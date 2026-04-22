@@ -35,6 +35,8 @@ jobs:
         run: |
           sudo apt update
           sudo ./iso-build/setup-builder.sh
+          # Monkey-patch live-build to ignore dangling symlink errors in chroot_hacks
+          sudo sed -i 's/chmod 0644 chroot\/boot\/\*/chmod 0644 chroot\/boot\/* 2>\/dev\/null || true/g' /usr/lib/live/build/chroot_hacks
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
