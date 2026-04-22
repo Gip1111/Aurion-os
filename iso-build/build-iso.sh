@@ -131,6 +131,8 @@ dbus
 network-manager
 wpasupplicant
 casper
+isolinux
+syslinux-utils
 
 # === Compositor & display ===
 labwc
