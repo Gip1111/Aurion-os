@@ -129,7 +129,7 @@ cat > config/package-lists/aurion.list.chroot << 'PACKAGES'
 # === Core system ===
 systemd
 dbus
-networkmanager
+network-manager
 wpasupplicant
 
 # === Compositor & display ===
@@ -144,7 +144,12 @@ pipewire-pulse
 wireplumber
 
 # === Qt6 runtime (for shell) ===
-qt6-qml-dev
+libqt6core6t64
+libqt6gui6t64
+libqt6quick6
+libqt6qml6
+libqt6dbus6t64
+libqt6waylandclient6
 qml6-module-qtquick
 qml6-module-qtquick-layouts
 qml6-module-qtquick-window
@@ -181,7 +186,6 @@ git
 
 # === Installer ===
 calamares
-calamares-settings-ubuntu
 
 # === Plymouth ===
 plymouth
