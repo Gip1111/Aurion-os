@@ -50,46 +50,48 @@ log "Repo: $REPO_DIR"
 log "Build dir: $BUILD_DIR"
 echo ""
 
-# --- Step 0: Build AurionOS components ---
+# --- Step 0: Build AurionOS components (non-fatal) ---
 step "[0/6] Building AurionOS components..."
 
-# Build shell
+# Build shell (non-fatal — ISO works without it)
 if [ ! -f "$REPO_DIR/shell/build/aurion-shell" ]; then
     log "Building Aurion Shell..."
-    cd "$REPO_DIR/shell"
-    mkdir -p build && cd build
-    cmake .. -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3
-    make -j"$(nproc)" 2>&1 | tail -3
-    cd "$REPO_DIR"
+    (
+        cd "$REPO_DIR/shell"
+        mkdir -p build && cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -20
+        make -j"$(nproc)" 2>&1 | tail -20
+    ) || warn "Shell build failed — continuing without it"
 fi
 
-# Build hardware scanner
+# Build hardware scanner (non-fatal)
 if [ ! -f "$REPO_DIR/hardware-compat/target/release/aurion-hwcompat" ]; then
     log "Building Hardware Scanner..."
-    cd "$REPO_DIR/hardware-compat"
-    # Rust may be installed for a non-root user
-    if command -v cargo &>/dev/null; then
-        cargo build --release 2>&1 | tail -3
-    elif [ -f "/home/$SUDO_USER/.cargo/bin/cargo" ]; then
-        sudo -u "$SUDO_USER" /home/$SUDO_USER/.cargo/bin/cargo build --release 2>&1 | tail -3
-    else
-        warn "Rust not found — skipping hardware scanner"
-    fi
-    cd "$REPO_DIR"
+    (
+        cd "$REPO_DIR/hardware-compat"
+        if command -v cargo &>/dev/null; then
+            cargo build --release 2>&1 | tail -20
+        elif [ -n "${SUDO_USER:-}" ] && [ -f "/home/$SUDO_USER/.cargo/bin/cargo" ]; then
+            sudo -u "$SUDO_USER" /home/$SUDO_USER/.cargo/bin/cargo build --release 2>&1 | tail -20
+        else
+            echo "Rust not found — skipping hardware scanner"
+        fi
+    ) || warn "Hardware scanner build failed — continuing without it"
 fi
 
-# Build diagnostics
+# Build diagnostics (non-fatal)
 if [ ! -f "$REPO_DIR/diagnostics/target/release/aurion-diag" ]; then
     log "Building Diagnostics..."
-    cd "$REPO_DIR/diagnostics"
-    if command -v cargo &>/dev/null; then
-        cargo build --release 2>&1 | tail -3
-    elif [ -f "/home/$SUDO_USER/.cargo/bin/cargo" ]; then
-        sudo -u "$SUDO_USER" /home/$SUDO_USER/.cargo/bin/cargo build --release 2>&1 | tail -3
-    else
-        warn "Rust not found — skipping diagnostics"
-    fi
-    cd "$REPO_DIR"
+    (
+        cd "$REPO_DIR/diagnostics"
+        if command -v cargo &>/dev/null; then
+            cargo build --release 2>&1 | tail -20
+        elif [ -n "${SUDO_USER:-}" ] && [ -f "/home/$SUDO_USER/.cargo/bin/cargo" ]; then
+            sudo -u "$SUDO_USER" /home/$SUDO_USER/.cargo/bin/cargo build --release 2>&1 | tail -20
+        else
+            echo "Rust not found — skipping diagnostics"
+        fi
+    ) || warn "Diagnostics build failed — continuing without it"
 fi
 
 # --- Step 1: Clean previous build ---

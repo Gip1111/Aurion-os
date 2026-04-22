@@ -9,11 +9,27 @@ on:
 jobs:
   build-iso:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
+      - name: Free disk space
+        run: |
+          echo "=== Disk before cleanup ==="
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          sudo docker image prune --all --force 2>/dev/null || true
+          echo "=== Disk after cleanup ==="
+          df -h /
+
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: |
+          chmod +x iso-build/build-iso.sh
+          chmod +x iso-build/setup-builder.sh
+          chmod +x iso-build/hooks/*.chroot
+          chmod +x distro/bin/aurion-session
 
       - name: Install build tools
         run: |
@@ -24,7 +40,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build AurionOS ISO
-        run: sudo ./iso-build/build-iso.sh
+        run: sudo env "PATH=$PATH" ./iso-build/build-iso.sh
 
       - name: Upload ISO
         uses: actions/upload-artifact@v4
