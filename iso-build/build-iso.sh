@@ -360,7 +360,12 @@ touch /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live/dummy-theme-file.t
 
 # Create missing bootlogo.tar.gz inside the chroot to prevent 'tar' from crashing
 mkdir -p /usr/share/gfxboot-theme-ubuntu
-tar -czf /usr/share/gfxboot-theme-ubuntu/bootlogo.tar.gz -T /dev/null
+mkdir -p /tmp/gfxboot-dummy
+touch /tmp/gfxboot-dummy/bootlogo
+touch /tmp/gfxboot-dummy/message
+touch /tmp/gfxboot-dummy/syslinux.cfg
+touch /tmp/gfxboot-dummy/isolinux.cfg
+tar -czf /usr/share/gfxboot-theme-ubuntu/bootlogo.tar.gz -C /tmp/gfxboot-dummy .
 
 echo "[AurionOS] Configuration complete."
 HOOK
