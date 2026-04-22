@@ -265,7 +265,9 @@ log "  Calamares config copied"
 
 # Copy installer hook
 cp "$REPO_DIR/iso-build/hooks/0200-calamares-setup.hook.chroot" "config/hooks/live/" 2>/dev/null || true
-chmod +x "config/hooks/live/0200-calamares-setup.hook.chroot" 2>/dev/null || true
+cp "$REPO_DIR/iso-build/hooks/0200-calamares-setup.hook.chroot" "config/hooks/normal/" 2>/dev/null || true
+cp "$REPO_DIR/iso-build/hooks/0200-calamares-setup.hook.chroot" "config/hooks/" 2>/dev/null || true
+chmod +x config/hooks/live/*.chroot config/hooks/normal/*.chroot config/hooks/*.chroot 2>/dev/null || true
 
 # --- Plymouth theme ---
 mkdir -p "$CHROOT/usr/share/plymouth/themes/aurion"
@@ -286,7 +288,7 @@ GREETD
 # --- Step 5: Chroot hooks (run during build inside the ISO filesystem) ---
 step "[5/6] Creating build hooks..."
 
-mkdir -p config/hooks/live
+mkdir -p config/hooks/live config/hooks/normal
 
 cat > config/hooks/live/0100-aurion-setup.hook.chroot << 'HOOK'
 #!/bin/bash
@@ -365,6 +367,11 @@ done
 echo "[AurionOS] Boot symlinks fixed."
 SYMLINKFIX
 chmod +x config/hooks/live/9999-fix-symlinks.hook.chroot
+
+# Duplicate hooks to ensure they run on any version of live-build
+cp config/hooks/live/*.chroot config/hooks/normal/ 2>/dev/null || true
+cp config/hooks/live/*.chroot config/hooks/ 2>/dev/null || true
+chmod +x config/hooks/normal/*.chroot config/hooks/*.chroot 2>/dev/null || true
 
 # --- Step 6: Build the ISO ---
 step "[6/6] Building ISO... (this takes 10-20 minutes)"
