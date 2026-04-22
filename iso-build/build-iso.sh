@@ -348,6 +348,12 @@ OSREL
 
 echo "AurionOS Alpha 0.1" > /etc/aurion-release
 
+# --- Install dummy packages to bypass live-build bug ---
+if ls /opt/dummy-pkgs/*.deb 1> /dev/null 2>&1; then
+    dpkg -i /opt/dummy-pkgs/*.deb || true
+    rm -rf /opt/dummy-pkgs
+fi
+
 echo "[AurionOS] Configuration complete."
 HOOK
 chmod +x config/hooks/live/0100-aurion-setup.hook.chroot
@@ -388,7 +394,7 @@ echo ""
 # --- Workaround for live-build ubuntu mode syslinux theme bug ---
 step "[5.5/6] Creating dummy packages for obsolete syslinux themes..."
 apt-get install -y -qq equivs
-mkdir -p config/packages.chroot
+mkdir -p config/includes.chroot/opt/dummy-pkgs
 
 # Create dummy package for syslinux-themes-ubuntu-oneiric
 cat > /tmp/dummy-syslinux.control <<EOF
@@ -400,7 +406,7 @@ Version: 99.0
 Description: Dummy package to bypass live-build bug
 EOF
 (cd /tmp && equivs-build dummy-syslinux.control >/dev/null)
-mv /tmp/syslinux-themes-ubuntu-oneiric_*.deb config/packages.chroot/
+mv /tmp/syslinux-themes-ubuntu-oneiric_*.deb config/includes.chroot/opt/dummy-pkgs/
 
 # Create dummy package for gfxboot-theme-ubuntu
 cat > /tmp/dummy-gfxboot.control <<EOF
@@ -412,7 +418,7 @@ Version: 99.0
 Description: Dummy package to bypass live-build bug
 EOF
 (cd /tmp && equivs-build dummy-gfxboot.control >/dev/null)
-mv /tmp/gfxboot-theme-ubuntu_*.deb config/packages.chroot/
+mv /tmp/gfxboot-theme-ubuntu_*.deb config/includes.chroot/opt/dummy-pkgs/
 
 lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
 
