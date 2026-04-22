@@ -114,7 +114,7 @@ lb config \
     --iso-publisher "AurionOS Project" \
     --iso-volume "AurionOS Alpha 0.1" \
     --linux-flavours generic \
-    --linux-packages "linux-image-generic" \
+    --linux-packages "linux-image" \
     --mode ubuntu \
     --system live \
     --apt-recommends false \
@@ -130,6 +130,7 @@ systemd
 dbus
 network-manager
 wpasupplicant
+casper
 
 # === Compositor & display ===
 labwc
@@ -366,6 +367,14 @@ done
 echo "[AurionOS] Boot symlinks fixed."
 SYMLINKFIX
 chmod +x config/hooks/live/9999-fix-symlinks.hook.chroot
+
+# Hook to force initramfs generation (in case it was deferred/skipped)
+cat > config/hooks/live/9998-force-initramfs.hook.chroot << 'INITRAMFS'
+#!/bin/bash
+echo "[AurionOS] Forcing initramfs generation..."
+update-initramfs -c -k all || true
+INITRAMFS
+chmod +x config/hooks/live/9998-force-initramfs.hook.chroot
 
 # Duplicate hooks to ensure they run on any version of live-build
 cp config/hooks/live/*.chroot config/hooks/normal/ 2>/dev/null || true
