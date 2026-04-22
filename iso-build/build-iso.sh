@@ -350,17 +350,25 @@ echo "[AurionOS] Configuration complete."
 HOOK
 chmod +x config/hooks/live/0100-aurion-setup.hook.chroot
 
+# Hook to fix dangling initrd symlinks (runs inside chroot, before lb_chroot_hacks)
+cat > config/hooks/live/9999-fix-symlinks.hook.chroot << 'SYMLINKFIX'
+#!/bin/bash
+# Fix dangling boot symlinks (known live-build issue on Ubuntu 24.04)
+# lb_chroot_hacks runs "chmod 0644 chroot/boot/*" which fails on dangling symlinks
+echo "[AurionOS] Fixing dangling boot symlinks..."
+for f in /boot/initrd.img /boot/initrd.img.old /boot/vmlinuz.old; do
+    if [ -L "$f" ] && [ ! -e "$f" ]; then
+        rm -f "$f"
+        echo "  Removed dangling symlink: $f"
+    fi
+done
+echo "[AurionOS] Boot symlinks fixed."
+SYMLINKFIX
+chmod +x config/hooks/live/9999-fix-symlinks.hook.chroot
+
 # --- Step 6: Build the ISO ---
 step "[6/6] Building ISO... (this takes 10-20 minutes)"
 echo ""
-
-# Fix dangling initrd symlinks (known live-build issue on Ubuntu 24.04)
-for f in "$BUILD_DIR"/chroot/boot/initrd.img "$BUILD_DIR"/chroot/boot/initrd.img.old; do
-    if [ -L "$f" ] && [ ! -e "$f" ]; then
-        rm -f "$f"
-        log "Removed dangling symlink: $f"
-    fi
-done
 
 lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
 
