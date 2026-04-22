@@ -354,6 +354,10 @@ if ls /opt/dummy-pkgs/*.deb 1> /dev/null 2>&1; then
     rm -rf /opt/dummy-pkgs
 fi
 
+# Create the missing theme directory inside the chroot to prevent 'cp' from crashing
+mkdir -p /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live
+touch /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live/dummy-theme-file.txt
+
 echo "[AurionOS] Configuration complete."
 HOOK
 chmod +x config/hooks/live/0100-aurion-setup.hook.chroot
