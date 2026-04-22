@@ -385,11 +385,34 @@ chmod +x config/hooks/normal/*.chroot config/hooks/*.chroot 2>/dev/null || true
 step "[6/6] Building ISO... (this takes 10-20 minutes)"
 echo ""
 
-# Monkey-patch live-build to avoid trying to install obsolete ubuntu syslinux themes
-if [ -f /usr/lib/live/build/binary_syslinux ]; then
-    sed -i 's/syslinux-themes-ubuntu-oneiric gfxboot-theme-ubuntu//g' /usr/lib/live/build/binary_syslinux || true
-    echo "[AurionOS] Monkey-patched /usr/lib/live/build/binary_syslinux"
-fi
+# --- Workaround for live-build ubuntu mode syslinux theme bug ---
+step "[5.5/6] Creating dummy packages for obsolete syslinux themes..."
+apt-get install -y -qq equivs
+mkdir -p config/packages.chroot
+
+# Create dummy package for syslinux-themes-ubuntu-oneiric
+cat > /tmp/dummy-syslinux.control <<EOF
+Section: misc
+Priority: optional
+Standards-Version: 3.9.2
+Package: syslinux-themes-ubuntu-oneiric
+Version: 99.0
+Description: Dummy package to bypass live-build bug
+EOF
+(cd /tmp && equivs-build dummy-syslinux.control >/dev/null)
+mv /tmp/syslinux-themes-ubuntu-oneiric_*.deb config/packages.chroot/
+
+# Create dummy package for gfxboot-theme-ubuntu
+cat > /tmp/dummy-gfxboot.control <<EOF
+Section: misc
+Priority: optional
+Standards-Version: 3.9.2
+Package: gfxboot-theme-ubuntu
+Version: 99.0
+Description: Dummy package to bypass live-build bug
+EOF
+(cd /tmp && equivs-build dummy-gfxboot.control >/dev/null)
+mv /tmp/gfxboot-theme-ubuntu_*.deb config/packages.chroot/
 
 lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
 
