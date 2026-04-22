@@ -375,6 +375,21 @@ echo "[AurionOS] Configuration complete."
 HOOK
 chmod +x config/hooks/live/0100-aurion-setup.hook.chroot
 
+# Hook to manually copy isolinux.bin and syslinux files to the binary directory
+cat > config/hooks/live/0101-aurion-syslinux-fix.hook.binary << 'SYSFIX'
+#!/bin/sh
+set -e
+echo "[AurionOS] Running binary hook to manually copy isolinux.bin..."
+mkdir -p binary/isolinux
+if [ -f chroot/usr/lib/ISOLINUX/isolinux.bin ]; then
+    cp chroot/usr/lib/ISOLINUX/isolinux.bin binary/isolinux/
+fi
+if [ -d chroot/usr/lib/syslinux/modules/bios ]; then
+    cp chroot/usr/lib/syslinux/modules/bios/* binary/isolinux/ 2>/dev/null || true
+fi
+SYSFIX
+chmod +x config/hooks/live/0101-aurion-syslinux-fix.hook.binary
+
 # Hook to fix dangling initrd symlinks (runs inside chroot, before lb_chroot_hacks)
 cat > config/hooks/live/9999-fix-symlinks.hook.chroot << 'SYMLINKFIX'
 #!/bin/bash
