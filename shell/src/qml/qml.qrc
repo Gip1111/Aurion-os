@@ -1,0 +1,12 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/qml">
+    <file alias="Main.qml">Main.qml</file>
+    <file alias="TopBar.qml">TopBar.qml</file>
+    <file alias="Dock.qml">Dock.qml</file>
+    <file alias="Launcher.qml">Launcher.qml</file>
+    <file alias="AISidebar.qml">AISidebar.qml</file>
+    <file alias="theme/AurionTheme.qml">theme/AurionTheme.qml</file>
+    <file alias="qmldir">qmldir</file>
+  </qresource>
+</RCC>

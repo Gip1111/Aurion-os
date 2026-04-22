@@ -1,0 +1,14 @@
+[Unit]
+Description=AurionOS AI Assistant Service
+Documentation=https://github.com/aurion-os/aurion-os
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -m aurion_ai.service
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

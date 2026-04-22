@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=AurionOS
+Description=AurionOS boot splash — minimal logo with aurora gradient pulse
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/aurion
+ScriptFile=/usr/share/plymouth/themes/aurion/aurion.script

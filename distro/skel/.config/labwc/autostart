@@ -1,0 +1,10 @@
+# AurionOS labwc autostart
+# Launched by labwc after compositor is ready.
+
+# Wallpaper: solid dark background
+swaybg -c '#0A0E1A' &
+
+# Start the Aurion shell (TopBar, Dock, Launcher, AI Sidebar)
+# If aurion-shell is not in PATH, this will fail silently.
+# The demo-run.sh script sets up its own autostart with full paths.
+aurion-shell &

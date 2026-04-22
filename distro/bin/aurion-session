@@ -1,0 +1,32 @@
+#!/bin/bash
+# AurionOS Session Startup Script
+# Called by greetd or manually: aurion-session
+# Starts labwc compositor, which then autostarts the shell and services.
+
+set -euo pipefail
+
+# --- Environment ---
+export XDG_CURRENT_DESKTOP=AurionOS
+export XDG_SESSION_TYPE=wayland
+export XDG_SESSION_DESKTOP=aurion
+export QT_QPA_PLATFORM=wayland
+export QT_WAYLAND_DISABLE_WINDOWDECORATION=1
+export MOZ_ENABLE_WAYLAND=1
+export GDK_BACKEND=wayland
+
+# Use Aurion Qt theme (placeholder until custom theme is built)
+export QT_STYLE_OVERRIDE=Fusion
+
+# Ensure D-Bus session bus is available
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    eval "$(dbus-launch --sh-syntax)"
+    export DBUS_SESSION_BUS_ADDRESS
+fi
+
+# --- Start user services ---
+systemctl --user start aurion-ai.service 2>/dev/null || true
+
+# --- Launch compositor ---
+# labwc reads autostart from ~/.config/labwc/autostart
+# which launches aurion-shell and other components
+exec labwc

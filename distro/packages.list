@@ -1,0 +1,67 @@
+# AurionOS — Packages to Install
+# These are installed on top of the Ubuntu 24.04 LTS base.
+
+# Compositor
+labwc
+
+# Login manager
+greetd
+
+# Wayland essentials
+xwayland
+wlr-randr
+wl-clipboard
+
+# Qt6 runtime (for shell)
+qt6-qml
+qt6-declarative
+qt6-wayland
+
+# Audio
+pipewire
+pipewire-pulse
+wireplumber
+
+# Networking
+network-manager
+network-manager-gnome
+
+# Bluetooth
+bluez
+bluez-tools
+
+# Firmware
+linux-firmware
+fwupd
+
+# Flatpak
+flatpak
+
+# Fonts
+fonts-inter
+fonts-jetbrains-mono
+
+# Rust toolchain (for development builds)
+# rustup  # install separately
+
+# Python (for AI service)
+python3
+python3-pip
+python3-venv
+
+# System utilities
+btrfs-progs
+htop
+neofetch
+curl
+wget
+git
+
+# Terminal
+foot
+
+# File manager (interim, until custom one is ready)
+thunar
+
+# Text editor (interim)
+mousepad

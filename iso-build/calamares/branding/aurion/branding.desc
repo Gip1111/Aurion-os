@@ -1,0 +1,32 @@
+---
+# AurionOS Calamares Branding
+
+componentName: aurion
+
+strings:
+    productName:       AurionOS
+    shortProductName:  AurionOS
+    version:           0.1 Alpha
+    shortVersion:      0.1
+    versionedName:     AurionOS 0.1 Alpha
+    shortVersionedName: AurionOS 0.1
+    bootloaderEntryName: AurionOS
+    productUrl:        https://aurion-os.dev
+    supportUrl:        https://github.com/aurion-os/aurion-os/issues
+    knownIssuesUrl:    https://github.com/aurion-os/aurion-os/issues
+    releaseNotesUrl:   https://github.com/aurion-os/aurion-os/releases
+
+images:
+    # These will be auto-generated or simple dark placeholders for alpha
+    productLogo:       "aurion-logo.png"
+    productIcon:       "aurion-icon.png"
+    productWelcome:    "aurion-welcome.png"
+
+slideshow:               "show.qml"
+slideshowAPI: 2
+
+style:
+    sidebarBackground:   "#0A0E1A"
+    sidebarText:         "#F1F5F9"
+    sidebarTextSelect:   "#6366F1"
+    sidebarTextHighlight: "#818CF8"

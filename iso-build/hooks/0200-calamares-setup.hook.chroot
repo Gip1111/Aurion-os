@@ -1,0 +1,40 @@
+#!/bin/bash
+# AurionOS chroot hook — Install Calamares config and desktop shortcut
+set -e
+
+echo "[AurionOS] Configuring installer..."
+
+# Copy Calamares branding (these files are placed by build-iso.sh into the chroot)
+CALA_DIR="/etc/calamares"
+mkdir -p "$CALA_DIR/branding/aurion"
+mkdir -p "$CALA_DIR/modules"
+
+# The build-iso.sh copies these files into the ISO filesystem before this hook runs
+# via includes.chroot. If they're not there, skip gracefully.
+if [ -f /opt/aurion-calamares/settings.conf ]; then
+    cp /opt/aurion-calamares/settings.conf "$CALA_DIR/"
+    cp -r /opt/aurion-calamares/branding/aurion/* "$CALA_DIR/branding/aurion/"
+    cp /opt/aurion-calamares/modules/*.conf "$CALA_DIR/modules/"
+    echo "[AurionOS] Calamares config installed."
+fi
+
+# Create desktop shortcut for installer
+mkdir -p /usr/share/applications
+cat > /usr/share/applications/aurion-install.desktop << 'DESKTOP'
+[Desktop Entry]
+Name=Install AurionOS
+Comment=Install AurionOS to your hard drive
+Exec=pkexec calamares
+Icon=calamares
+Terminal=false
+Type=Application
+Categories=System;
+Keywords=install;installer;
+DESKTOP
+
+# Auto-add to desktop for live session
+mkdir -p /etc/skel/Desktop
+cp /usr/share/applications/aurion-install.desktop /etc/skel/Desktop/
+chmod +x /etc/skel/Desktop/aurion-install.desktop
+
+echo "[AurionOS] Installer configured."

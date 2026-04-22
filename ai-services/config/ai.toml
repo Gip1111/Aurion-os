@@ -1,0 +1,16 @@
+# AurionOS AI Service configuration
+# Provider: "mock" (no backend needed), "ollama" (local LLM), or future providers
+# Cloud providers are NEVER enabled by default.
+
+[ai]
+provider = "mock"           # Change to "ollama" when Ollama is running
+model = "phi3:mini"         # Model to use with Ollama
+base_url = "http://localhost:11434"
+temperature = 0.3
+max_tokens = 2048
+
+# [cloud]
+# enabled = false           # Must be explicitly set to true by user
+# provider = "openai_compat"
+# api_key = ""              # User must provide their own key
+# base_url = ""

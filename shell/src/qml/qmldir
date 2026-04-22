@@ -1,0 +1,7 @@
+module AurionShell
+singleton AurionTheme 1.0 theme/AurionTheme.qml
+Main 1.0 Main.qml
+TopBar 1.0 TopBar.qml
+Dock 1.0 Dock.qml
+Launcher 1.0 Launcher.qml
+AISidebar 1.0 AISidebar.qml

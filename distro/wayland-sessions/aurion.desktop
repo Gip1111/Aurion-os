@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=AurionOS
+Comment=AurionOS Desktop (labwc + Aurion Shell)
+Exec=/usr/local/bin/aurion-session
+Type=Application
+DesktopNames=AurionOS

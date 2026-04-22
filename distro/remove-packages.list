@@ -1,0 +1,38 @@
+# AurionOS — Packages to Remove from Ubuntu Base
+# These remove Ubuntu/GNOME branding and default apps we're replacing.
+
+# GNOME desktop (replaced by labwc + Aurion Shell)
+gnome-shell
+gnome-session
+gdm3
+ubuntu-session
+ubuntu-desktop-minimal
+
+# GNOME apps (replaced by Aurion equivalents or Flatpak)
+gnome-terminal
+gnome-text-editor
+gnome-calculator
+gnome-calendar
+gnome-weather
+gnome-clocks
+gnome-characters
+gnome-logs
+gnome-system-monitor
+eog
+evince
+totem
+gedit
+yelp
+
+# Ubuntu branding
+ubuntu-wallpapers
+ubuntu-wallpapers-noble
+plymouth-theme-ubuntu-text
+plymouth-theme-ubuntu-logo
+yaru-theme-gnome-shell
+yaru-theme-gtk
+yaru-theme-icon
+yaru-theme-sound
+
+# Snap is kept (Flatpak-first, Snap-optional)
+# Do NOT remove snapd in MVP to avoid Ubuntu packaging friction
