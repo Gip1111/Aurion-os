@@ -110,7 +110,6 @@ lb config \
     --archive-areas "main restricted universe multiverse" \
     --architectures amd64 \
     --binary-images iso-hybrid \
-    --bootloaders "grub-efi,syslinux" \
     --debian-installer none \
     --iso-application "AurionOS" \
     --iso-publisher "AurionOS Project" \
@@ -119,11 +118,8 @@ lb config \
     --linux-packages "linux-image linux-headers" \
     --mode ubuntu \
     --system live \
-    --updates true \
-    --security true \
     --apt-recommends false \
-    --memtest none \
-    --win32-loader false
+    --memtest none
 
 # --- Step 3: Package lists ---
 step "[3/6] Configuring packages..."

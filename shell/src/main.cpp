@@ -8,6 +8,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QDBusConnection>
+#include <QDBusError>
 #include <QDebug>
 #include <QScreen>
 

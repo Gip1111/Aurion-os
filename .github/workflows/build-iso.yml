@@ -39,8 +39,18 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Configure Rust for root
+        run: |
+          # The dtolnay action installs for 'runner' user.
+          # Copy the toolchain config so sudo (root) can also use it.
+          RUSTUP_HOME=$(rustup show home)
+          CARGO_HOME=$(dirname $(which cargo))/..
+          echo "RUSTUP_HOME=$RUSTUP_HOME" >> $GITHUB_ENV
+          echo "CARGO_HOME=$CARGO_HOME" >> $GITHUB_ENV
+          sudo env "PATH=$PATH" "RUSTUP_HOME=$RUSTUP_HOME" "CARGO_HOME=$CARGO_HOME" rustup default stable
+
       - name: Build AurionOS ISO
-        run: sudo env "PATH=$PATH" ./iso-build/build-iso.sh
+        run: sudo env "PATH=$PATH" "RUSTUP_HOME=$RUSTUP_HOME" "CARGO_HOME=$CARGO_HOME" ./iso-build/build-iso.sh
 
       - name: Upload ISO
         uses: actions/upload-artifact@v4
