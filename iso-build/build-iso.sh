@@ -420,6 +420,10 @@ EOF
 (cd /tmp && equivs-build dummy-gfxboot.control >/dev/null)
 mv /tmp/gfxboot-theme-ubuntu_*.deb config/includes.chroot/opt/dummy-pkgs/
 
+# Create the missing theme directory on the host to prevent 'cp' from crashing in binary_syslinux
+mkdir -p /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live
+touch /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live/dummy-theme-file.txt
+
 lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
 
 # --- Move output ---
