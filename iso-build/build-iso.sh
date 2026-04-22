@@ -361,7 +361,9 @@ touch /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live/dummy-theme-file.t
 # Create missing bootlogo.tar.gz inside the chroot to prevent 'tar' from crashing
 mkdir -p /usr/share/gfxboot-theme-ubuntu
 mkdir -p /tmp/gfxboot-dummy
-touch /tmp/gfxboot-dummy/bootlogo
+echo "dummy" > /tmp/gfxboot-dummy/dummy.txt
+# Create a valid cpio archive for bootlogo
+(cd /tmp/gfxboot-dummy && echo "dummy.txt" | cpio -o -H newc > bootlogo)
 touch /tmp/gfxboot-dummy/message
 touch /tmp/gfxboot-dummy/syslinux.cfg
 touch /tmp/gfxboot-dummy/isolinux.cfg
