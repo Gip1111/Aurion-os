@@ -118,7 +118,8 @@ lb config \
     --mode ubuntu \
     --system live \
     --apt-recommends false \
-    --memtest none
+    --memtest none \
+    --bootloaders "grub-efi,grub-pc"
 
 # --- Step 3: Package lists ---
 step "[3/6] Configuring packages..."
@@ -131,6 +132,8 @@ dbus
 network-manager
 wpasupplicant
 casper
+grub-pc-bin
+grub-efi-amd64-bin
 
 # === Compositor & display ===
 labwc
