@@ -118,8 +118,7 @@ lb config \
     --mode ubuntu \
     --system live \
     --apt-recommends false \
-    --memtest none \
-    --bootloaders "grub-efi,grub-pc"
+    --memtest none
 
 # --- Step 3: Package lists ---
 step "[3/6] Configuring packages..."
@@ -132,8 +131,6 @@ dbus
 network-manager
 wpasupplicant
 casper
-grub-pc-bin
-grub-efi-amd64-bin
 
 # === Compositor & display ===
 labwc
@@ -387,6 +384,12 @@ chmod +x config/hooks/normal/*.chroot config/hooks/*.chroot 2>/dev/null || true
 # --- Step 6: Build the ISO ---
 step "[6/6] Building ISO... (this takes 10-20 minutes)"
 echo ""
+
+# Monkey-patch live-build to avoid trying to install obsolete ubuntu syslinux themes
+if [ -f /usr/lib/live/build/binary_syslinux ]; then
+    sed -i 's/syslinux-themes-ubuntu-oneiric gfxboot-theme-ubuntu//g' /usr/lib/live/build/binary_syslinux || true
+    echo "[AurionOS] Monkey-patched /usr/lib/live/build/binary_syslinux"
+fi
 
 lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
 
