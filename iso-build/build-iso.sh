@@ -371,6 +371,16 @@ touch /tmp/gfxboot-dummy/syslinux.cfg
 touch /tmp/gfxboot-dummy/isolinux.cfg
 tar -czf /usr/share/gfxboot-theme-ubuntu/bootlogo.tar.gz -C /tmp/gfxboot-dummy .
 
+# Fix for outdated live-build syslinux paths: copy files to legacy locations
+echo "Copying isolinux files to legacy paths for live-build..."
+mkdir -p /usr/lib/syslinux
+if [ -f /usr/lib/ISOLINUX/isolinux.bin ]; then
+    cp /usr/lib/ISOLINUX/isolinux.bin /usr/lib/syslinux/isolinux.bin
+fi
+if [ -d /usr/lib/syslinux/modules/bios ]; then
+    cp -r /usr/lib/syslinux/modules/bios/* /usr/lib/syslinux/ 2>/dev/null || true
+fi
+
 echo "[AurionOS] Configuration complete."
 HOOK
 chmod +x config/hooks/live/0100-aurion-setup.hook.chroot
