@@ -110,12 +110,11 @@ lb config \
     --archive-areas "main restricted universe multiverse" \
     --architectures amd64 \
     --binary-images iso-hybrid \
-    --debian-installer none \
     --iso-application "AurionOS" \
     --iso-publisher "AurionOS Project" \
     --iso-volume "AurionOS Alpha 0.1" \
     --linux-flavours generic \
-    --linux-packages "linux-image" \
+    --linux-packages "linux-image-generic" \
     --mode ubuntu \
     --system live \
     --apt-recommends false \
