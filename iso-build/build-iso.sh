@@ -115,7 +115,7 @@ lb config \
     --iso-publisher "AurionOS Project" \
     --iso-volume "AurionOS Alpha 0.1" \
     --linux-flavours generic \
-    --linux-packages "linux-image linux-headers" \
+    --linux-packages "linux-image" \
     --mode ubuntu \
     --system live \
     --apt-recommends false \
@@ -354,7 +354,15 @@ chmod +x config/hooks/live/0100-aurion-setup.hook.chroot
 step "[6/6] Building ISO... (this takes 10-20 minutes)"
 echo ""
 
-lb build 2>&1 | tee "$OUTPUT_DIR/build.log"
+# Fix dangling initrd symlinks (known live-build issue on Ubuntu 24.04)
+for f in "$BUILD_DIR"/chroot/boot/initrd.img "$BUILD_DIR"/chroot/boot/initrd.img.old; do
+    if [ -L "$f" ] && [ ! -e "$f" ]; then
+        rm -f "$f"
+        log "Removed dangling symlink: $f"
+    fi
+done
+
+lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
 
 # --- Move output ---
 if ls "$BUILD_DIR"/*.iso 1>/dev/null 2>&1; then
