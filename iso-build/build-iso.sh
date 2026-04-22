@@ -385,21 +385,6 @@ echo "[AurionOS] Configuration complete."
 HOOK
 chmod +x config/hooks/live/0100-aurion-setup.hook.chroot
 
-# Hook to manually copy isolinux.bin and syslinux files to the binary directory
-cat > config/hooks/live/0101-aurion-syslinux-fix.hook.binary << 'SYSFIX'
-#!/bin/sh
-set -e
-echo "[AurionOS] Running binary hook to manually copy isolinux.bin..."
-mkdir -p binary/isolinux
-if [ -f chroot/usr/lib/ISOLINUX/isolinux.bin ]; then
-    cp chroot/usr/lib/ISOLINUX/isolinux.bin binary/isolinux/
-fi
-if [ -d chroot/usr/lib/syslinux/modules/bios ]; then
-    cp chroot/usr/lib/syslinux/modules/bios/* binary/isolinux/ 2>/dev/null || true
-fi
-SYSFIX
-chmod +x config/hooks/live/0101-aurion-syslinux-fix.hook.binary
-
 # Hook to fix dangling initrd symlinks (runs inside chroot, before lb_chroot_hacks)
 cat > config/hooks/live/9999-fix-symlinks.hook.chroot << 'SYMLINKFIX'
 #!/bin/bash
@@ -465,6 +450,51 @@ mv /tmp/gfxboot-theme-ubuntu_*.deb config/includes.chroot/opt/dummy-pkgs/
 # Create the missing theme directory on the host to prevent 'cp' from crashing in binary_syslinux
 mkdir -p /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live
 touch /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live/dummy-theme-file.txt
+
+# --- Fix live-build syslinux script on the host ---
+step "[5.8/6] Patching live-build syslinux script for robust ISO generation..."
+if [ -f /usr/lib/live/build/lb_binary_syslinux ]; then
+    # Suppress cp errors for empty wildcards
+    sed -i 's|cp binary/isolinux/\*.fnt|cp binary/isolinux/*.fnt 2>/dev/null || true|g' /usr/lib/live/build/lb_binary_syslinux
+    sed -i 's|cp binary/isolinux/\*.hlp|cp binary/isolinux/*.hlp 2>/dev/null || true|g' /usr/lib/live/build/lb_binary_syslinux
+    sed -i 's|cp binary/isolinux/\*.jpg|cp binary/isolinux/*.jpg 2>/dev/null || true|g' /usr/lib/live/build/lb_binary_syslinux
+    sed -i 's|cp binary/isolinux/langlist|cp binary/isolinux/langlist 2>/dev/null || true|g' /usr/lib/live/build/lb_binary_syslinux
+
+    # Append robust isolinux.bin generation logic
+    cat >> /usr/lib/live/build/lb_binary_syslinux << 'EOF'
+
+# --- AURION ROBUST ISOLINUX FIX ---
+echo "[AurionOS] Ensuring isolinux.bin exists in binary/isolinux..."
+mkdir -p binary/isolinux
+
+# Search for isolinux.bin in all likely places and copy it
+if [ -f chroot/usr/lib/ISOLINUX/isolinux.bin ]; then
+    cp chroot/usr/lib/ISOLINUX/isolinux.bin binary/isolinux/isolinux.bin
+elif [ -f chroot/usr/lib/syslinux/isolinux.bin ]; then
+    cp chroot/usr/lib/syslinux/isolinux.bin binary/isolinux/isolinux.bin
+elif [ -f /usr/lib/ISOLINUX/isolinux.bin ]; then
+    cp /usr/lib/ISOLINUX/isolinux.bin binary/isolinux/isolinux.bin
+fi
+
+# Same for c32 modules
+if [ -d chroot/usr/lib/syslinux/modules/bios ]; then
+    cp chroot/usr/lib/syslinux/modules/bios/* binary/isolinux/ 2>/dev/null || true
+elif [ -d chroot/usr/lib/syslinux ]; then
+    cp chroot/usr/lib/syslinux/*.c32 binary/isolinux/ 2>/dev/null || true
+fi
+
+echo "[AurionOS] Debug: binary/isolinux contents before genisoimage:"
+ls -lah binary/isolinux/ || true
+
+# Explicit check
+if [ ! -f binary/isolinux/isolinux.bin ]; then
+    echo "ERROR: isolinux.bin is missing from binary/isolinux!"
+    echo "This will cause genisoimage to fail. Aborting."
+    exit 1
+fi
+echo "[AurionOS] isolinux.bin successfully verified."
+EOF
+fi
 
 lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
 
