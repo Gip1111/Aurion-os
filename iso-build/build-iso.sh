@@ -358,6 +358,10 @@ fi
 mkdir -p /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live
 touch /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live/dummy-theme-file.txt
 
+# Create missing bootlogo.tar.gz inside the chroot to prevent 'tar' from crashing
+mkdir -p /usr/share/gfxboot-theme-ubuntu
+tar -czf /usr/share/gfxboot-theme-ubuntu/bootlogo.tar.gz -T /dev/null
+
 echo "[AurionOS] Configuration complete."
 HOOK
 chmod +x config/hooks/live/0100-aurion-setup.hook.chroot
