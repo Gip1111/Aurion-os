@@ -24,6 +24,7 @@ apt install -y -qq \
     xorriso \
     grub-efi-amd64-bin \
     grub-efi-amd64-signed \
+    shim-signed \
     grub-pc-bin \
     syslinux-utils \
     isolinux \

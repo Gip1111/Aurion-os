@@ -109,13 +109,13 @@ lb config \
     --parent-archive-areas "main restricted universe multiverse" \
     --archive-areas "main restricted universe multiverse" \
     --architectures amd64 \
-    --binary-images iso \
+    --binary-images iso-hybrid \
     --iso-application "AurionOS" \
     --iso-publisher "AurionOS Project" \
     --iso-volume "AurionOS Alpha 0.1" \
     --linux-flavours generic \
     --linux-packages "linux-image" \
-    --bootloader "grub-efi" \
+    --bootloader "syslinux" \
     --mode ubuntu \
     --system live \
     --apt-recommends false \
@@ -533,17 +533,16 @@ fi
 echo "[AurionOS] All graphical components validated successfully."
 
 # --- Disable live-build's broken ISO generator ---
-step "[5.9/6] Bypassing live-build ISO generator (using grub-mkrescue instead)..."
+step "[5.9/6] Bypassing live-build ISO generator (using custom xorriso instead)..."
 if [ -f /usr/lib/live/build/lb_binary_iso ]; then
     chmod -x /usr/lib/live/build/lb_binary_iso
 fi
 
 lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
 
-# --- Final Step: Generate the Hybrid ISO robustly ---
-step "[6/6] Generating Hybrid UEFI/BIOS ISO with grub-mkrescue..."
+# --- Final Step: Generate the Secure Boot Hybrid ISO robustly ---
+step "[6/6] Generating Secure Boot Hybrid ISO with xorriso..."
 
-# Find kernel and initrd paths (live-build puts them in binary/casper or binary/live)
 KERNEL_PATH=$(ls binary/casper/vmlinuz* 2>/dev/null | head -n 1 || ls binary/live/vmlinuz* 2>/dev/null | head -n 1)
 INITRD_PATH=$(ls binary/casper/initrd* 2>/dev/null | head -n 1 || ls binary/live/initrd* 2>/dev/null | head -n 1)
 
@@ -558,9 +557,17 @@ BOOT_DIR=$(basename $(dirname "$KERNEL_PATH"))
 echo "[AurionOS] Found kernel: /$BOOT_DIR/$K_FILE"
 echo "[AurionOS] Found initrd: /$BOOT_DIR/$I_FILE"
 
-# Create a pristine GRUB configuration
-mkdir -p binary/boot/grub
-cat > binary/boot/grub/grub.cfg << EOF
+# --- Create Secure Boot EFI Partition ---
+echo "[AurionOS] Constructing signed EFI partition..."
+mkdir -p build_efi/EFI/BOOT
+mkdir -p build_efi/boot/grub
+
+# Copy signed binaries from host to EFI partition
+cp /usr/lib/shim/shimx64.efi.signed build_efi/EFI/BOOT/BOOTx64.EFI
+cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed build_efi/EFI/BOOT/grubx64.efi
+
+# Create GRUB configuration
+cat > build_efi/boot/grub/grub.cfg << EOF
 set default=0
 set timeout=5
 set gfxmode=auto
@@ -577,8 +584,28 @@ menuentry "Start AurionOS Live (Safe Graphics)" {
 }
 EOF
 
-# Run grub-mkrescue to build the ultimate hybrid ISO
-grub-mkrescue -o "$OUTPUT_DIR/$ISO_NAME.iso" binary/
+# Sync GRUB config to binary/ as well for completeness
+mkdir -p binary/boot/grub
+cp build_efi/boot/grub/grub.cfg binary/boot/grub/grub.cfg
+
+# Generate the FAT32 image for the EFI System Partition (ESP)
+dd if=/dev/zero of=binary/boot/grub/efi.img bs=1M count=10
+mkfs.vfat binary/boot/grub/efi.img
+mcopy -i binary/boot/grub/efi.img -s build_efi/* ::/
+
+echo "[AurionOS] EFI partition verified successfully."
+
+# --- Run xorriso to build the ultimate hybrid ISO ---
+echo "[AurionOS] Running xorriso..."
+xorriso -as mkisofs \
+    -r -J -joliet-long -l -cache-inodes -iso-level 3 \
+    -V "AURIONOS_LIVE" \
+    -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot \
+    -boot-load-size 4 -boot-info-table \
+    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+    -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot \
+    -isohybrid-gpt-basdat \
+    -o "$OUTPUT_DIR/$ISO_NAME.iso" binary/
 
 # --- Move output ---
 if [ -f "$OUTPUT_DIR/$ISO_NAME.iso" ]; then
