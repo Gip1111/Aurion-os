@@ -115,7 +115,7 @@ lb config \
     --iso-volume "AurionOS Alpha 0.1" \
     --linux-flavours generic \
     --linux-packages "linux-image" \
-    --bootloaders "syslinux,grub-efi" \
+    --bootloader "syslinux,grub-efi" \
     --mode ubuntu \
     --system live \
     --apt-recommends false \
