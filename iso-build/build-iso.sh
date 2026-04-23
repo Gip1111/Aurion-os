@@ -109,13 +109,13 @@ lb config \
     --parent-archive-areas "main restricted universe multiverse" \
     --archive-areas "main restricted universe multiverse" \
     --architectures amd64 \
-    --binary-images iso-hybrid \
+    --binary-images iso \
     --iso-application "AurionOS" \
     --iso-publisher "AurionOS Project" \
     --iso-volume "AurionOS Alpha 0.1" \
     --linux-flavours generic \
     --linux-packages "linux-image" \
-    --bootloader "syslinux,grub-efi" \
+    --bootloader "grub-efi" \
     --mode ubuntu \
     --system live \
     --apt-recommends false \
@@ -472,53 +472,8 @@ mv /tmp/gfxboot-theme-ubuntu_*.deb config/includes.chroot/opt/dummy-pkgs/
 mkdir -p /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live
 touch /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live/dummy-theme-file.txt
 
-# --- Fix live-build syslinux script on the host ---
-step "[5.8/6] Patching live-build syslinux script for robust ISO generation..."
-if [ -f /usr/lib/live/build/lb_binary_syslinux ]; then
-    # Suppress cp errors for empty wildcards
-    sed -i 's@cp binary/isolinux/\*.fnt@cp binary/isolinux/*.fnt 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
-    sed -i 's@cp binary/isolinux/\*.hlp@cp binary/isolinux/*.hlp 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
-    sed -i 's@cp binary/isolinux/\*.jpg@cp binary/isolinux/*.jpg 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
-    sed -i 's@cp binary/isolinux/langlist@cp binary/isolinux/langlist 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
-
-    # Append robust isolinux.bin generation logic
-    cat >> /usr/lib/live/build/lb_binary_syslinux << 'EOF'
-
-# --- AURION ROBUST ISOLINUX FIX ---
-echo "[AurionOS] Ensuring isolinux.bin exists in binary/isolinux..."
-mkdir -p binary/isolinux
-
-# Search for isolinux.bin in all likely places and copy it
-if [ -f chroot/usr/lib/ISOLINUX/isolinux.bin ]; then
-    cp chroot/usr/lib/ISOLINUX/isolinux.bin binary/isolinux/isolinux.bin
-elif [ -f chroot/usr/lib/syslinux/isolinux.bin ]; then
-    cp chroot/usr/lib/syslinux/isolinux.bin binary/isolinux/isolinux.bin
-elif [ -f /usr/lib/ISOLINUX/isolinux.bin ]; then
-    cp /usr/lib/ISOLINUX/isolinux.bin binary/isolinux/isolinux.bin
-fi
-
-# Same for c32 modules
-if [ -d chroot/usr/lib/syslinux/modules/bios ]; then
-    cp chroot/usr/lib/syslinux/modules/bios/* binary/isolinux/ 2>/dev/null || true
-elif [ -d chroot/usr/lib/syslinux ]; then
-    cp chroot/usr/lib/syslinux/*.c32 binary/isolinux/ 2>/dev/null || true
-fi
-
-echo "[AurionOS] Debug: binary/isolinux contents before genisoimage:"
-ls -lah binary/isolinux/ || true
-
-# Explicit check
-if [ ! -f binary/isolinux/isolinux.bin ]; then
-    echo "ERROR: isolinux.bin is missing from binary/isolinux!"
-    echo "This will cause genisoimage to fail. Aborting."
-    exit 1
-fi
-echo "[AurionOS] isolinux.bin successfully verified."
-EOF
-fi
-
 # --- Compile and Inject Custom Graphical Shell ---
-step "[5.9/6] Compiling AurionOS Shell & Injecting Configs..."
+step "[5.8/6] Compiling AurionOS Shell & Injecting Configs..."
 if [ -d shell ]; then
     echo "Compiling aurion-shell natively..."
     mkdir -p shell/build
@@ -577,11 +532,56 @@ if [ $FAIL -eq 1 ]; then
 fi
 echo "[AurionOS] All graphical components validated successfully."
 
+# --- Disable live-build's broken ISO generator ---
+step "[5.9/6] Bypassing live-build ISO generator (using grub-mkrescue instead)..."
+if [ -f /usr/lib/live/build/lb_binary_iso ]; then
+    chmod -x /usr/lib/live/build/lb_binary_iso
+fi
+
 lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
 
+# --- Final Step: Generate the Hybrid ISO robustly ---
+step "[6/6] Generating Hybrid UEFI/BIOS ISO with grub-mkrescue..."
+
+# Find kernel and initrd paths (live-build puts them in binary/casper or binary/live)
+KERNEL_PATH=$(ls binary/casper/vmlinuz* 2>/dev/null | head -n 1 || ls binary/live/vmlinuz* 2>/dev/null | head -n 1)
+INITRD_PATH=$(ls binary/casper/initrd* 2>/dev/null | head -n 1 || ls binary/live/initrd* 2>/dev/null | head -n 1)
+
+if [ -z "$KERNEL_PATH" ]; then
+    fail "FATAL: Could not find kernel in binary/casper or binary/live! Squashfs build failed."
+fi
+
+K_FILE=$(basename "$KERNEL_PATH")
+I_FILE=$(basename "$INITRD_PATH")
+BOOT_DIR=$(basename $(dirname "$KERNEL_PATH"))
+
+echo "[AurionOS] Found kernel: /$BOOT_DIR/$K_FILE"
+echo "[AurionOS] Found initrd: /$BOOT_DIR/$I_FILE"
+
+# Create a pristine GRUB configuration
+mkdir -p binary/boot/grub
+cat > binary/boot/grub/grub.cfg << EOF
+set default=0
+set timeout=5
+set gfxmode=auto
+set gfxpayload=keep
+
+menuentry "Start AurionOS Live (Wayland)" {
+    linux /$BOOT_DIR/$K_FILE boot=casper quiet splash ---
+    initrd /$BOOT_DIR/$I_FILE
+}
+
+menuentry "Start AurionOS Live (Safe Graphics)" {
+    linux /$BOOT_DIR/$K_FILE boot=casper nomodeset quiet splash ---
+    initrd /$BOOT_DIR/$I_FILE
+}
+EOF
+
+# Run grub-mkrescue to build the ultimate hybrid ISO
+grub-mkrescue -o "$OUTPUT_DIR/$ISO_NAME.iso" binary/
+
 # --- Move output ---
-if ls "$BUILD_DIR"/*.iso 1>/dev/null 2>&1; then
-    mv "$BUILD_DIR"/*.iso "$OUTPUT_DIR/$ISO_NAME.iso"
+if [ -f "$OUTPUT_DIR/$ISO_NAME.iso" ]; then
     ISO_SIZE=$(du -h "$OUTPUT_DIR/$ISO_NAME.iso" | cut -f1)
     echo ""
     log "╔══════════════════════════════════════════════╗"
