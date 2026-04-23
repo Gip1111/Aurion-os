@@ -350,6 +350,26 @@ OSREL
 
 echo "AurionOS Alpha 0.1" > /etc/aurion-release
 
+# --- Configure Live User (Casper) ---
+cat > /etc/casper.conf << 'CASPER'
+export USERNAME="aurion"
+export USERFULLNAME="AurionOS Live"
+export HOST="aurion-live"
+export BUILD_SYSTEM="Ubuntu"
+export FLAVOUR="AurionOS"
+CASPER
+
+# --- Configure Greetd Auto-Login ---
+mkdir -p /etc/greetd
+cat > /etc/greetd/config.toml << 'GREETD'
+[terminal]
+vt = 1
+
+[default_session]
+command = "/usr/local/bin/aurion-session"
+user = "aurion"
+GREETD
+
 # --- Install dummy packages to bypass live-build bug ---
 if ls /opt/dummy-pkgs/*.deb 1> /dev/null 2>&1; then
     dpkg -i /opt/dummy-pkgs/*.deb || true
@@ -495,6 +515,66 @@ fi
 echo "[AurionOS] isolinux.bin successfully verified."
 EOF
 fi
+
+# --- Compile and Inject Custom Graphical Shell ---
+step "[5.9/6] Compiling AurionOS Shell & Injecting Configs..."
+if [ -d shell ]; then
+    echo "Compiling aurion-shell natively..."
+    mkdir -p shell/build
+    (cd shell/build && cmake .. && make -j$(nproc))
+else
+    echo "WARNING: shell/ directory not found in workspace."
+fi
+
+echo "Copying shell and distro configs into ISO chroot..."
+mkdir -p config/includes.chroot/usr/local/bin
+mkdir -p config/includes.chroot/usr/share/wayland-sessions
+mkdir -p config/includes.chroot/etc/skel/.config/labwc
+
+# Shell binary
+if [ -f shell/build/aurion-shell ]; then
+    cp shell/build/aurion-shell config/includes.chroot/usr/local/bin/
+    chmod +x config/includes.chroot/usr/local/bin/aurion-shell
+else
+    warn "aurion-shell binary missing! Compilation may have failed."
+fi
+
+# Session script
+if [ -f distro/bin/aurion-session ]; then
+    cp distro/bin/aurion-session config/includes.chroot/usr/local/bin/
+    chmod +x config/includes.chroot/usr/local/bin/aurion-session
+fi
+
+# Wayland session file
+if [ -f distro/wayland-sessions/aurion.desktop ]; then
+    cp distro/wayland-sessions/aurion.desktop config/includes.chroot/usr/share/wayland-sessions/
+fi
+
+# labwc autostart
+if [ -d distro/skel/.config/labwc ]; then
+    cp -r distro/skel/.config/labwc/* config/includes.chroot/etc/skel/.config/labwc/
+fi
+
+# Validation Checks
+echo "Validating graphical components before build..."
+FAIL=0
+if [ ! -f config/includes.chroot/usr/local/bin/aurion-shell ]; then
+    echo "ERROR: aurion-shell missing in chroot!"
+    FAIL=1
+fi
+if [ ! -f config/includes.chroot/usr/local/bin/aurion-session ]; then
+    echo "ERROR: aurion-session missing in chroot!"
+    FAIL=1
+fi
+if [ ! -f config/includes.chroot/usr/share/wayland-sessions/aurion.desktop ]; then
+    echo "ERROR: aurion.desktop missing in chroot!"
+    FAIL=1
+fi
+if [ $FAIL -eq 1 ]; then
+    echo "Validation failed. Aborting build."
+    exit 1
+fi
+echo "[AurionOS] All graphical components validated successfully."
 
 lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
 
