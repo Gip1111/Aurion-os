@@ -455,10 +455,10 @@ touch /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live/dummy-theme-file.t
 step "[5.8/6] Patching live-build syslinux script for robust ISO generation..."
 if [ -f /usr/lib/live/build/lb_binary_syslinux ]; then
     # Suppress cp errors for empty wildcards
-    sed -i 's|cp binary/isolinux/\*.fnt|cp binary/isolinux/*.fnt 2>/dev/null || true|g' /usr/lib/live/build/lb_binary_syslinux
-    sed -i 's|cp binary/isolinux/\*.hlp|cp binary/isolinux/*.hlp 2>/dev/null || true|g' /usr/lib/live/build/lb_binary_syslinux
-    sed -i 's|cp binary/isolinux/\*.jpg|cp binary/isolinux/*.jpg 2>/dev/null || true|g' /usr/lib/live/build/lb_binary_syslinux
-    sed -i 's|cp binary/isolinux/langlist|cp binary/isolinux/langlist 2>/dev/null || true|g' /usr/lib/live/build/lb_binary_syslinux
+    sed -i 's@cp binary/isolinux/\*.fnt@cp binary/isolinux/*.fnt 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
+    sed -i 's@cp binary/isolinux/\*.hlp@cp binary/isolinux/*.hlp 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
+    sed -i 's@cp binary/isolinux/\*.jpg@cp binary/isolinux/*.jpg 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
+    sed -i 's@cp binary/isolinux/langlist@cp binary/isolinux/langlist 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
 
     # Append robust isolinux.bin generation logic
     cat >> /usr/lib/live/build/lb_binary_syslinux << 'EOF'
