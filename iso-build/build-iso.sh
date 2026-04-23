@@ -472,6 +472,55 @@ mv /tmp/gfxboot-theme-ubuntu_*.deb config/includes.chroot/opt/dummy-pkgs/
 mkdir -p /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live
 touch /usr/share/syslinux/themes/ubuntu-oneiric/isolinux-live/dummy-theme-file.txt
 
+# --- Fix live-build syslinux script on the host ---
+step "[5.7/6] Patching live-build syslinux script for robust ISO generation..."
+if [ -f /usr/lib/live/build/lb_binary_syslinux ]; then
+    # Suppress cp errors for empty wildcards
+    sed -i 's@cp binary/isolinux/\*.fnt@cp binary/isolinux/*.fnt 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
+    sed -i 's@cp binary/isolinux/\*.hlp@cp binary/isolinux/*.hlp 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
+    sed -i 's@cp binary/isolinux/\*.jpg@cp binary/isolinux/*.jpg 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
+    sed -i 's@cp binary/isolinux/langlist@cp binary/isolinux/langlist 2>/dev/null || true@g' /usr/lib/live/build/lb_binary_syslinux
+
+    # Append robust isolinux.bin generation logic
+    cat >> /usr/lib/live/build/lb_binary_syslinux << 'EOF'
+
+# --- AURION ROBUST ISOLINUX FIX ---
+echo "[AurionOS] Ensuring isolinux.bin exists in binary/isolinux..."
+mkdir -p binary/isolinux
+
+# Search for isolinux.bin in all likely places and copy it
+if [ -f chroot/usr/lib/ISOLINUX/isolinux.bin ]; then
+    cp chroot/usr/lib/ISOLINUX/isolinux.bin binary/isolinux/isolinux.bin
+elif [ -f chroot/usr/lib/syslinux/isolinux.bin ]; then
+    cp chroot/usr/lib/syslinux/isolinux.bin binary/isolinux/isolinux.bin
+elif [ -f /usr/lib/ISOLINUX/isolinux.bin ]; then
+    cp /usr/lib/ISOLINUX/isolinux.bin binary/isolinux/isolinux.bin
+fi
+
+# Same for c32 modules and isohdpfx.bin
+if [ -d chroot/usr/lib/syslinux/modules/bios ]; then
+    cp chroot/usr/lib/syslinux/modules/bios/* binary/isolinux/ 2>/dev/null || true
+elif [ -d chroot/usr/lib/syslinux ]; then
+    cp chroot/usr/lib/syslinux/*.c32 binary/isolinux/ 2>/dev/null || true
+fi
+
+if [ -f chroot/usr/lib/ISOLINUX/isohdpfx.bin ]; then
+    cp chroot/usr/lib/ISOLINUX/isohdpfx.bin binary/isolinux/isohdpfx.bin
+fi
+
+echo "[AurionOS] Debug: binary/isolinux contents before xorriso:"
+ls -lah binary/isolinux/ || true
+
+# Explicit check
+if [ ! -f binary/isolinux/isolinux.bin ]; then
+    echo "ERROR: isolinux.bin is missing from binary/isolinux!"
+    echo "This will cause xorriso to fail. Aborting."
+    exit 1
+fi
+echo "[AurionOS] isolinux.bin successfully verified."
+EOF
+fi
+
 # --- Compile and Inject Custom Graphical Shell ---
 step "[5.8/6] Compiling AurionOS Shell & Injecting Configs..."
 if [ -d shell ]; then
@@ -535,7 +584,9 @@ echo "[AurionOS] All graphical components validated successfully."
 # --- Disable live-build's broken ISO generator ---
 step "[5.9/6] Bypassing live-build ISO generator (using custom xorriso instead)..."
 if [ -f /usr/lib/live/build/lb_binary_iso ]; then
-    chmod -x /usr/lib/live/build/lb_binary_iso
+    # Clear the file and make it exit 0 so live-build doesn't crash with "no such script"
+    echo "#!/bin/sh" > /usr/lib/live/build/lb_binary_iso
+    echo "exit 0" >> /usr/lib/live/build/lb_binary_iso
 fi
 
 lb build 2>&1 | tee "$OUTPUT_DIR/build.log" || warn "lb build exited with errors (checking if ISO was produced anyway)"
@@ -597,12 +648,25 @@ echo "[AurionOS] EFI partition verified successfully."
 
 # --- Run xorriso to build the ultimate hybrid ISO ---
 echo "[AurionOS] Running xorriso..."
+
+# Detect MBR boot record dynamically
+MBR_FILE="/usr/lib/ISOLINUX/isohdpfx.bin"
+if [ -f "binary/isolinux/isohdpfx.bin" ]; then
+    MBR_FILE="binary/isolinux/isohdpfx.bin"
+elif [ -f "chroot/usr/lib/ISOLINUX/isohdpfx.bin" ]; then
+    MBR_FILE="chroot/usr/lib/ISOLINUX/isohdpfx.bin"
+fi
+
+if [ ! -f "$MBR_FILE" ]; then
+    warn "isohdpfx.bin not found! MBR boot might fail. Proceeding anyway."
+fi
+
 xorriso -as mkisofs \
     -r -J -joliet-long -l -cache-inodes -iso-level 3 \
     -V "AURIONOS_LIVE" \
     -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot \
     -boot-load-size 4 -boot-info-table \
-    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+    -isohybrid-mbr "$MBR_FILE" \
     -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot \
     -isohybrid-gpt-basdat \
     -o "$OUTPUT_DIR/$ISO_NAME.iso" binary/
