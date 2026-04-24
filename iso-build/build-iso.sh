@@ -129,6 +129,7 @@ cat > config/package-lists/aurion.list.chroot << 'PACKAGES'
 # === Core system ===
 systemd
 dbus
+dbus-user-session
 network-manager
 wpasupplicant
 casper
@@ -140,6 +141,7 @@ labwc
 swaybg
 xwayland
 greetd
+seatd
 
 # === Audio ===
 pipewire
@@ -318,15 +320,42 @@ if [ -f /usr/share/plymouth/themes/aurion/aurion.plymouth ]; then
         /usr/share/plymouth/themes/aurion/aurion.plymouth || true
 fi
 
-# --- Enable greetd, disable GDM ---
-systemctl disable gdm3 2>/dev/null || true
-systemctl enable greetd 2>/dev/null || true
+# --- Enable greetd, disable all other display managers ---
+# Silent failures on DM enable = text login at boot. Hard-check greetd.
+systemctl disable gdm3.service 2>/dev/null || true
+systemctl disable lightdm.service 2>/dev/null || true
+systemctl disable sddm.service 2>/dev/null || true
+
+# Default target MUST be graphical — otherwise systemd boots multi-user.target
+# and we land on a getty text login instead of the display manager.
+systemctl set-default graphical.target
+
+# Ensure the greetd unit exists before enabling (fail loudly if not)
+if [ ! -f /lib/systemd/system/greetd.service ] && [ ! -f /etc/systemd/system/greetd.service ]; then
+    echo "FATAL: greetd.service unit not found — greetd package failed to install?"
+    dpkg -l greetd || true
+    exit 1
+fi
+systemctl enable greetd.service
+# Make display-manager.service alias point to greetd (what graphical.target wants)
+ln -sf /lib/systemd/system/greetd.service /etc/systemd/system/display-manager.service
 
 # --- Create live user ---
+# NB: casper.conf USERNAME=aurion drives casper's own user creation at live boot,
+# but pre-creating here guarantees the user exists in the installed system too
+# (after calamares) and seeds /home/aurion from /etc/skel.
 if ! id aurion &>/dev/null; then
-    useradd -m -s /bin/bash -G sudo,video,audio,input aurion
+    useradd -m -s /bin/bash -G sudo,video,audio,input,render,netdev,plugdev aurion
     echo "aurion:aurion" | chpasswd
     echo "aurion ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/aurion
+    chmod 440 /etc/sudoers.d/aurion
+fi
+
+# Force-seed skel into /home/aurion even if user pre-existed (ensures labwc
+# autostart and aurion configs are present on first login).
+if [ -d /etc/skel ]; then
+    cp -rT /etc/skel /home/aurion
+    chown -R aurion:aurion /home/aurion
 fi
 
 # --- Install AI service ---
@@ -608,43 +637,73 @@ BOOT_DIR=$(basename $(dirname "$KERNEL_PATH"))
 echo "[AurionOS] Found kernel: /$BOOT_DIR/$K_FILE"
 echo "[AurionOS] Found initrd: /$BOOT_DIR/$I_FILE"
 
-# --- Create Secure Boot EFI Partition ---
-echo "[AurionOS] Constructing signed EFI partition..."
+# --- Create Secure Boot EFI Partition (Signed Shim + Grub) ---
+echo "[AurionOS] Constructing signed EFI partition for Secure Boot..."
+rm -rf build_efi
 mkdir -p build_efi/EFI/BOOT
-mkdir -p build_efi/boot/grub
 
-# Copy signed binaries from host to EFI partition
-cp /usr/lib/shim/shimx64.efi.signed build_efi/EFI/BOOT/BOOTx64.EFI
+# Copy signed binaries from host
+cp /usr/lib/shim/shimx64.efi.signed build_efi/EFI/BOOT/BOOTX64.EFI
 cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed build_efi/EFI/BOOT/grubx64.efi
+cp /usr/lib/shim/mmx64.efi.signed build_efi/EFI/BOOT/mmx64.efi
+cp /usr/lib/shim/fbx64.efi.signed build_efi/EFI/BOOT/fbx64.efi
 
-# Create GRUB configuration
-cat > build_efi/boot/grub/grub.cfg << EOF
+# Create a "stub" grub.cfg inside the EFI partition.
+cat > build_efi/EFI/BOOT/grub.cfg << 'EOF'
+set timeout=1
+set default=0
+
+# Search for the ISO root by volume label
+search --no-floppy --set=root --label AURIONOS_LIVE
+
+# Point to the real GRUB directory and load the main menu
+set prefix=($root)/boot/grub
+if [ -f ($root)/boot/grub/grub.cfg ]; then
+    configfile ($root)/boot/grub/grub.cfg
+fi
+
+# Fallback in case search fails
+menuentry "AurionOS Alpha (Safe Mode)" {
+    linux /casper/vmlinuz boot=casper quiet splash ---
+    initrd /casper/initrd
+}
+EOF
+
+# Generate the FAT32 image for the EFI System Partition (ESP)
+echo "[AurionOS] Packaging efi.img..."
+dd if=/dev/zero of=binary/boot/grub/efi.img bs=1M count=10
+mkfs.vfat -F 32 binary/boot/grub/efi.img
+mcopy -i binary/boot/grub/efi.img -s build_efi/* ::/
+
+# --- Real grub.cfg on iso9660 root (the main menu) ---
+echo "[AurionOS] Preparing main GRUB menu..."
+mkdir -p binary/boot/grub
+cat > binary/boot/grub/grub.cfg << EOF
+# AurionOS Alpha main boot menu
 set default=0
 set timeout=5
 set gfxmode=auto
 set gfxpayload=keep
 
+insmod all_video
+insmod gfxterm
+insmod png
+
 menuentry "Start AurionOS Live (Wayland)" {
-    linux /$BOOT_DIR/$K_FILE boot=casper quiet splash ---
+    linux  /$BOOT_DIR/$K_FILE boot=casper quiet splash ---
     initrd /$BOOT_DIR/$I_FILE
 }
 
 menuentry "Start AurionOS Live (Safe Graphics)" {
-    linux /$BOOT_DIR/$K_FILE boot=casper nomodeset quiet splash ---
+    linux  /$BOOT_DIR/$K_FILE boot=casper nomodeset quiet splash ---
+    initrd /$BOOT_DIR/$I_FILE
+}
+
+menuentry "Hardware Diagnostics" {
+    linux  /$BOOT_DIR/$K_FILE boot=casper aurion.diag=1 quiet splash ---
     initrd /$BOOT_DIR/$I_FILE
 }
 EOF
-
-# Sync GRUB config to binary/ as well for completeness
-mkdir -p binary/boot/grub
-cp build_efi/boot/grub/grub.cfg binary/boot/grub/grub.cfg
-
-# Generate the FAT32 image for the EFI System Partition (ESP)
-dd if=/dev/zero of=binary/boot/grub/efi.img bs=1M count=10
-mkfs.vfat binary/boot/grub/efi.img
-mcopy -i binary/boot/grub/efi.img -s build_efi/* ::/
-
-echo "[AurionOS] EFI partition verified successfully."
 
 # --- Run xorriso to build the ultimate hybrid ISO ---
 echo "[AurionOS] Running xorriso..."
@@ -657,13 +716,9 @@ elif [ -f "chroot/usr/lib/ISOLINUX/isohdpfx.bin" ]; then
     MBR_FILE="chroot/usr/lib/ISOLINUX/isohdpfx.bin"
 fi
 
-if [ ! -f "$MBR_FILE" ]; then
-    warn "isohdpfx.bin not found! MBR boot might fail. Proceeding anyway."
-fi
-
 xorriso -as mkisofs \
-    -r -J -joliet-long -l -cache-inodes -iso-level 3 \
-    -V "AURIONOS_LIVE" \
+    -r -V "AURIONOS_LIVE" \
+    -J -joliet-long -l -cache-inodes -iso-level 3 \
     -b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot \
     -boot-load-size 4 -boot-info-table \
     -isohybrid-mbr "$MBR_FILE" \
@@ -676,10 +731,11 @@ if [ -f "$OUTPUT_DIR/$ISO_NAME.iso" ]; then
     ISO_SIZE=$(du -h "$OUTPUT_DIR/$ISO_NAME.iso" | cut -f1)
     echo ""
     log "╔══════════════════════════════════════════════╗"
-    log "║          ISO BUILD COMPLETE                   ║"
+    log "║          ISO BUILD COMPLETE (SIGNED)          ║"
     log "╠══════════════════════════════════════════════╣"
     log "║ File: $OUTPUT_DIR/$ISO_NAME.iso"
     log "║ Size: $ISO_SIZE"
+    log "║ Mode: Secure Boot / UEFI / Legacy BIOS       ║"
     log "╠══════════════════════════════════════════════╣"
     log "║ Boot it in VirtualBox/VMware/QEMU or         ║"
     log "║ flash to USB with:                           ║"
@@ -688,3 +744,5 @@ if [ -f "$OUTPUT_DIR/$ISO_NAME.iso" ]; then
 else
     fail "ISO build failed. Check $OUTPUT_DIR/build.log"
 fi
+
+
