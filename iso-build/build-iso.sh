@@ -243,12 +243,53 @@ mkdir -p "$CHROOT/etc/skel/.config/labwc"
 cp "$REPO_DIR/distro/skel/.config/labwc/rc.xml" "$CHROOT/etc/skel/.config/labwc/"
 cp "$REPO_DIR/distro/skel/.config/labwc/environment" "$CHROOT/etc/skel/.config/labwc/"
 
-# Autostart for live session (uses full paths)
-cat > "$CHROOT/etc/skel/.config/labwc/autostart" << 'AUTOSTART'
-swaybg -c '#0A0E1A' &
-/usr/local/bin/aurion-shell &
-/usr/local/bin/aurion-hwcompat --scan --json > /tmp/aurion-hw-report.json 2>/dev/null &
-AUTOSTART
+# Autostart for live session — installed in BOTH skel and /etc/xdg so it runs
+# regardless of how /home/aurion was populated (chroot skel vs casper dynamic
+# user creation). labwc reads autostart from, in order:
+#   1. $XDG_CONFIG_HOME/labwc/autostart  (-> ~/.config/labwc/autostart)
+#   2. /etc/xdg/labwc/autostart          (system-wide fallback)
+# Only the first found is used — so we write the SAME robust script to both.
+# The script logs to $XDG_RUNTIME_DIR/aurion-autostart.log so we can diagnose
+# the "only mouse cursor" scenario (= compositor up, autostart didn't run
+# or spawned binaries that crashed silently).
+AUTOSTART_BODY='#!/bin/sh
+LOG="${XDG_RUNTIME_DIR:-/tmp}/aurion-autostart.log"
+exec >>"$LOG" 2>&1
+echo "=== aurion autostart @ $(date) as $(id -un) on $WAYLAND_DISPLAY ==="
+
+# 1. Background so the screen is not pitch black even if the shell fails
+if command -v swaybg >/dev/null 2>&1; then
+    swaybg -c "#0A0E1A" &
+    echo "swaybg started (pid $!)"
+else
+    echo "WARN: swaybg not installed"
+fi
+
+# 2. Aurion shell — the main UI
+if [ -x /usr/local/bin/aurion-shell ]; then
+    /usr/local/bin/aurion-shell &
+    echo "aurion-shell started (pid $!)"
+else
+    echo "WARN: /usr/local/bin/aurion-shell missing or not executable"
+    # Fallback so the user is not stuck with a blank cursor — give them a terminal
+    if command -v foot >/dev/null 2>&1; then
+        foot &
+        echo "foot launched as shell fallback (pid $!)"
+    fi
+fi
+
+# 3. Hardware scan (best effort, non-fatal)
+if [ -x /usr/local/bin/aurion-hwcompat ]; then
+    /usr/local/bin/aurion-hwcompat --scan --json > /tmp/aurion-hw-report.json 2>/dev/null &
+fi
+'
+
+mkdir -p "$CHROOT/etc/skel/.config/labwc"
+mkdir -p "$CHROOT/etc/xdg/labwc"
+printf '%s' "$AUTOSTART_BODY" > "$CHROOT/etc/skel/.config/labwc/autostart"
+printf '%s' "$AUTOSTART_BODY" > "$CHROOT/etc/xdg/labwc/autostart"
+chmod +x "$CHROOT/etc/skel/.config/labwc/autostart"
+chmod +x "$CHROOT/etc/xdg/labwc/autostart"
 
 # --- AI service ---
 mkdir -p "$CHROOT/opt/aurion-ai"
@@ -637,49 +678,126 @@ BOOT_DIR=$(basename $(dirname "$KERNEL_PATH"))
 echo "[AurionOS] Found kernel: /$BOOT_DIR/$K_FILE"
 echo "[AurionOS] Found initrd: /$BOOT_DIR/$I_FILE"
 
-# --- Create Secure Boot EFI Partition (Signed Shim + Grub) ---
-echo "[AurionOS] Constructing signed EFI partition for Secure Boot..."
+# --- Create EFI Boot Partition via grub-mkstandalone ---
+# The Canonical signed-grub chain (shim -> grubx64.efi.signed) was unreliable:
+# signed grub has a hardcoded prefix+UUID inside an immutable memdisk and does
+# NOT honor an external stub grub.cfg in /EFI/BOOT/ — result: drop to grub>
+# prompt with no menu. We build our own standalone grub EFI binary with the
+# config embedded IN the binary itself. Boot is guaranteed deterministic.
+# Tradeoff: unsigned => Secure Boot must be OFF in firmware.
+echo "[AurionOS] Building standalone GRUB EFI binary with embedded config (build-tag=EMB_V2)..."
 rm -rf build_efi
 mkdir -p build_efi/EFI/BOOT
 
-# Copy signed binaries from host
-cp /usr/lib/shim/shimx64.efi.signed build_efi/EFI/BOOT/BOOTX64.EFI
-cp /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed build_efi/EFI/BOOT/grubx64.efi
-cp /usr/lib/shim/mmx64.efi.signed build_efi/EFI/BOOT/mmx64.efi
-cp /usr/lib/shim/fbx64.efi.signed build_efi/EFI/BOOT/fbx64.efi
+# Embedded memdisk config — executed automatically by grub at startup.
+# Prints debug info so that if anything fails we see WHERE, not a silent prompt.
+cat > /tmp/aurion-memdisk-grub.cfg << 'EOF'
+# === AurionOS embedded grub.cfg (build tag: EMB_V2) ===
+insmod all_video
+insmod gfxterm
+insmod iso9660
+insmod fat
+insmod part_gpt
+insmod part_msdos
+insmod search_label
+insmod search_fs_uuid
+insmod configfile
+insmod echo
+insmod test
+insmod regexp
 
-# Create a "stub" grub.cfg inside the EFI partition.
-cat > build_efi/EFI/BOOT/grub.cfg << 'EOF'
-set timeout=1
-set default=0
+terminal_output console
+echo "=== AurionOS GRUB (standalone EMB_V2) ==="
+echo "cmdpath=$cmdpath prefix=$prefix root=$root"
 
-# Search for the ISO root by volume label
-search --no-floppy --set=root --label AURIONOS_LIVE
-
-# Point to the real GRUB directory and load the main menu
-set prefix=($root)/boot/grub
-if [ -f ($root)/boot/grub/grub.cfg ]; then
-    configfile ($root)/boot/grub/grub.cfg
+if search --no-floppy --set=aurion_root --label AURIONOS_LIVE; then
+    echo "Found AURIONOS_LIVE volume at ($aurion_root)"
+    set root=$aurion_root
+    set prefix=($aurion_root)/boot/grub
+    if [ -f ($aurion_root)/boot/grub/grub.cfg ]; then
+        echo "Loading ($aurion_root)/boot/grub/grub.cfg ..."
+        configfile ($aurion_root)/boot/grub/grub.cfg
+    else
+        echo "WARN: ($aurion_root)/boot/grub/grub.cfg not found on volume"
+    fi
+else
+    echo "WARN: search --label AURIONOS_LIVE failed. Visible devices:"
+    ls
 fi
 
-# Fallback in case search fails
-menuentry "AurionOS Alpha (Safe Mode)" {
-    linux /casper/vmlinuz boot=casper quiet splash ---
-    initrd /casper/initrd
+# Fallback inline menu: reached only if chainload above failed.
+# Kernel/initrd names substituted at build time by sed below.
+set timeout_style=menu
+set timeout=10
+set default=0
+
+menuentry "Start AurionOS Live (Wayland)" {
+    search --no-floppy --set=root --label AURIONOS_LIVE
+    echo "Loading kernel from ($root)/__BOOT_DIR__/__K_FILE__ ..."
+    linux  ($root)/__BOOT_DIR__/__K_FILE__ boot=casper quiet splash ---
+    initrd ($root)/__BOOT_DIR__/__I_FILE__
+}
+menuentry "Start AurionOS Live (Safe Graphics)" {
+    search --no-floppy --set=root --label AURIONOS_LIVE
+    linux  ($root)/__BOOT_DIR__/__K_FILE__ boot=casper nomodeset quiet splash ---
+    initrd ($root)/__BOOT_DIR__/__I_FILE__
 }
 EOF
 
-# Generate the FAT32 image for the EFI System Partition (ESP)
-echo "[AurionOS] Packaging efi.img..."
-dd if=/dev/zero of=binary/boot/grub/efi.img bs=1M count=10
-mkfs.vfat -F 32 binary/boot/grub/efi.img
-mcopy -i binary/boot/grub/efi.img -s build_efi/* ::/
+# Substitute kernel/initrd filenames into the fallback section
+sed -i "s|__BOOT_DIR__|$BOOT_DIR|g; s|__K_FILE__|$K_FILE|g; s|__I_FILE__|$I_FILE|g" \
+    /tmp/aurion-memdisk-grub.cfg
 
-# --- Real grub.cfg on iso9660 root (the main menu) ---
-echo "[AurionOS] Preparing main GRUB menu..."
+# Build the standalone grub EFI binary. The file mapping
+# "boot/grub/grub.cfg=/tmp/..." places our config at (memdisk)/boot/grub/grub.cfg,
+# which is where grub-mkstandalone sets $prefix by default — so grub auto-loads
+# our config at startup. No external stub needed.
+GRUB_MODULES="all_video boot btrfs cat chain configfile echo efifwsetup efinet \
+    ext2 fat font gettext gfxmenu gfxterm gfxterm_background gzio halt help \
+    hfsplus iso9660 jfs jpeg keystatus linux loadenv loopback ls lsefi lsefimmap \
+    lsefisystab memdisk minicmd normal part_apple part_gpt part_msdos png probe \
+    reboot regexp search search_fs_file search_fs_uuid search_label sleep test \
+    true video xfs"
+
+grub-mkstandalone \
+    --format=x86_64-efi \
+    --output=build_efi/EFI/BOOT/BOOTx64.EFI \
+    --modules="$GRUB_MODULES" \
+    --locales="" \
+    --fonts="" \
+    "boot/grub/grub.cfg=/tmp/aurion-memdisk-grub.cfg" \
+    || fail "grub-mkstandalone failed — check that grub-efi-amd64-bin is installed"
+
+# Sanity check the produced binary
+EFI_BIN_SIZE=$(stat -c%s build_efi/EFI/BOOT/BOOTx64.EFI)
+if [ "$EFI_BIN_SIZE" -lt 1000000 ]; then
+    fail "BOOTx64.EFI is too small ($EFI_BIN_SIZE bytes) — grub-mkstandalone likely malfunctioned"
+fi
+echo "[AurionOS] Built BOOTx64.EFI (${EFI_BIN_SIZE} bytes)"
+
+# --- Package efi.img (FAT32 ESP) ---
+echo "[AurionOS] Packaging efi.img..."
+mkdir -p binary/boot/grub
+dd if=/dev/zero of=binary/boot/grub/efi.img bs=1M count=16 status=none
+mkfs.vfat -F 32 -n AURIONEFI binary/boot/grub/efi.img >/dev/null
+
+mmd  -i binary/boot/grub/efi.img ::/EFI
+mmd  -i binary/boot/grub/efi.img ::/EFI/BOOT
+mcopy -i binary/boot/grub/efi.img build_efi/EFI/BOOT/BOOTx64.EFI ::/EFI/BOOT/BOOTx64.EFI
+# Mirror at grubx64.efi for firmwares that probe that name
+mcopy -i binary/boot/grub/efi.img build_efi/EFI/BOOT/BOOTx64.EFI ::/EFI/BOOT/grubx64.efi
+
+echo "[AurionOS] efi.img contents:"
+mdir -i binary/boot/grub/efi.img -/ ::/ || true
+
+# --- Real grub.cfg on iso9660 root (chainloaded from embedded config above) ---
+echo "[AurionOS] Preparing main GRUB menu on iso9660 root..."
 mkdir -p binary/boot/grub
 cat > binary/boot/grub/grub.cfg << EOF
-# AurionOS Alpha main boot menu
+# AurionOS main GRUB menu — chainloaded by BOOTx64.EFI embedded config
+search --no-floppy --set=root --label AURIONOS_LIVE
+set prefix=(\$root)/boot/grub
+
 set default=0
 set timeout=5
 set gfxmode=auto
@@ -687,7 +805,7 @@ set gfxpayload=keep
 
 insmod all_video
 insmod gfxterm
-insmod png
+insmod iso9660
 
 menuentry "Start AurionOS Live (Wayland)" {
     linux  /$BOOT_DIR/$K_FILE boot=casper quiet splash ---
@@ -701,6 +819,11 @@ menuentry "Start AurionOS Live (Safe Graphics)" {
 
 menuentry "Hardware Diagnostics" {
     linux  /$BOOT_DIR/$K_FILE boot=casper aurion.diag=1 quiet splash ---
+    initrd /$BOOT_DIR/$I_FILE
+}
+
+menuentry "Check disc for defects" {
+    linux  /$BOOT_DIR/$K_FILE boot=casper integrity-check quiet splash ---
     initrd /$BOOT_DIR/$I_FILE
 }
 EOF
@@ -725,6 +848,26 @@ xorriso -as mkisofs \
     -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot \
     -isohybrid-gpt-basdat \
     -o "$OUTPUT_DIR/$ISO_NAME.iso" binary/
+
+# --- Post-build: verify boot layout inside the produced ISO ---
+if [ -f "$OUTPUT_DIR/$ISO_NAME.iso" ]; then
+    echo ""
+    echo "[AurionOS] ===== Final ISO boot layout verification ====="
+    echo "[AurionOS] grub.cfg files found in iso9660:"
+    xorriso -indev "$OUTPUT_DIR/$ISO_NAME.iso" -find / -name grub.cfg 2>/dev/null || true
+    echo "[AurionOS] /boot listing:"
+    xorriso -indev "$OUTPUT_DIR/$ISO_NAME.iso" -ls /boot 2>/dev/null || true
+    echo "[AurionOS] Contents of embedded efi.img (FAT32 ESP):"
+    xorriso -osirrox on -indev "$OUTPUT_DIR/$ISO_NAME.iso" \
+        -extract /boot/grub/efi.img /tmp/aurionos_efi_check.img 2>/dev/null || true
+    if [ -f /tmp/aurionos_efi_check.img ]; then
+        mdir -i /tmp/aurionos_efi_check.img -/ ::/ || true
+        EMB_SIZE=$(mtype -i /tmp/aurionos_efi_check.img ::/EFI/BOOT/BOOTx64.EFI 2>/dev/null | wc -c)
+        echo "[AurionOS] BOOTx64.EFI inside efi.img: ~${EMB_SIZE} bytes"
+        rm -f /tmp/aurionos_efi_check.img
+    fi
+    echo "[AurionOS] =============================================="
+fi
 
 # --- Move output ---
 if [ -f "$OUTPUT_DIR/$ISO_NAME.iso" ]; then
