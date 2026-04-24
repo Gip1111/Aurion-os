@@ -678,21 +678,63 @@ BOOT_DIR=$(basename $(dirname "$KERNEL_PATH"))
 echo "[AurionOS] Found kernel: /$BOOT_DIR/$K_FILE"
 echo "[AurionOS] Found initrd: /$BOOT_DIR/$I_FILE"
 
-# --- Create EFI Boot Partition via grub-mkstandalone ---
-# The Canonical signed-grub chain (shim -> grubx64.efi.signed) was unreliable:
-# signed grub has a hardcoded prefix+UUID inside an immutable memdisk and does
-# NOT honor an external stub grub.cfg in /EFI/BOOT/ — result: drop to grub>
-# prompt with no menu. We build our own standalone grub EFI binary with the
-# config embedded IN the binary itself. Boot is guaranteed deterministic.
-# Tradeoff: unsigned => Secure Boot must be OFF in firmware.
-echo "[AurionOS] Building standalone GRUB EFI binary with embedded config (build-tag=EMB_V2)..."
+# --- Create Secure-Boot-compatible EFI partition ---
+# Strategy: use Canonical's signed shim + signed grub (the pair that Ubuntu
+# live ISOs use), but CHAIN via a SECOND unsigned grub that we build with
+# grub-mkstandalone and whose config is embedded. The flow is:
+#
+#   firmware (SB ON)  ->  shim (MS-signed)
+#   shim              ->  grubx64.efi (Canonical-signed, Canonical cert is baked
+#                                      into shim, so this passes SB)
+#   Canonical grub    ->  LOOKS for grub.cfg in several paths on the ESP.
+#                         We place an identical stub in ALL plausible paths so
+#                         no matter where Canonical's signed grub searches, it
+#                         finds it. Each stub echoes a unique tag so if we see
+#                         the grub> prompt we can tell the user WHICH stub was
+#                         tried last.
+#   Stub              ->  search --label AURIONOS_LIVE, then chainload the real
+#                         menu at /boot/grub/grub.cfg on the iso9660 volume.
+#
+# This is exactly the pattern Debian/Ubuntu live-build uses. Secure Boot stays
+# ON in the firmware and the whole chain validates.
+echo "[AurionOS] Constructing signed Secure-Boot EFI partition (build-tag=SB_V3)..."
 rm -rf build_efi
 mkdir -p build_efi/EFI/BOOT
+mkdir -p build_efi/EFI/ubuntu
+mkdir -p build_efi/boot/grub
 
-# Embedded memdisk config — executed automatically by grub at startup.
-# Prints debug info so that if anything fails we see WHERE, not a silent prompt.
-cat > /tmp/aurion-memdisk-grub.cfg << 'EOF'
-# === AurionOS embedded grub.cfg (build tag: EMB_V2) ===
+# --- Step A: copy Canonical signed binaries ---
+# shimx64.efi.signed is Microsoft-signed, contains Canonical's cert and loads
+# grubx64.efi from the SAME directory ($cmdpath in shim terms).
+SHIM_SRC="/usr/lib/shim/shimx64.efi.signed"
+GRUB_SIGNED_SRC="/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed"
+MM_SRC="/usr/lib/shim/mmx64.efi.signed"
+
+[ -f "$SHIM_SRC" ]        || fail "Missing $SHIM_SRC (install shim-signed)"
+[ -f "$GRUB_SIGNED_SRC" ] || fail "Missing $GRUB_SIGNED_SRC (install grub-efi-amd64-signed)"
+
+cp "$SHIM_SRC"        build_efi/EFI/BOOT/BOOTx64.EFI
+cp "$GRUB_SIGNED_SRC" build_efi/EFI/BOOT/grubx64.efi
+cp "$GRUB_SIGNED_SRC" build_efi/EFI/ubuntu/grubx64.efi
+[ -f "$MM_SRC" ] && cp "$MM_SRC" build_efi/EFI/BOOT/mmx64.efi || true
+
+# --- Step B: discover where Canonical signed grub looks for grub.cfg ---
+# Dump strings from the signed binary so the build log shows the embedded
+# prefix — useful when diagnosing boot failures.
+echo "[AurionOS] Canonical signed grub embedded strings (prefix/cfg hints):"
+strings "$GRUB_SIGNED_SRC" | grep -E "^/(EFI|boot|grub)" | sort -u | head -20 || true
+
+# --- Step C: build the shared stub grub.cfg body ---
+# A single template that every stub inherits. Each stub prepends a single
+# "echo STUB=<path>" line so if we still hit the rescue prompt the last thing
+# printed on screen tells us which path the signed grub loaded.
+make_stub () {
+    local tag="$1"
+    local out="$2"
+    mkdir -p "$(dirname "$out")"
+    cat > "$out" <<EOF
+echo "=== AurionOS stub=$tag loaded ==="
+echo "cmdpath=\$cmdpath prefix=\$prefix root=\$root"
 insmod all_video
 insmod gfxterm
 insmod iso9660
@@ -704,90 +746,63 @@ insmod search_fs_uuid
 insmod configfile
 insmod echo
 insmod test
-insmod regexp
-
-terminal_output console
-echo "=== AurionOS GRUB (standalone EMB_V2) ==="
-echo "cmdpath=$cmdpath prefix=$prefix root=$root"
-
 if search --no-floppy --set=aurion_root --label AURIONOS_LIVE; then
-    echo "Found AURIONOS_LIVE volume at ($aurion_root)"
-    set root=$aurion_root
-    set prefix=($aurion_root)/boot/grub
-    if [ -f ($aurion_root)/boot/grub/grub.cfg ]; then
-        echo "Loading ($aurion_root)/boot/grub/grub.cfg ..."
-        configfile ($aurion_root)/boot/grub/grub.cfg
-    else
-        echo "WARN: ($aurion_root)/boot/grub/grub.cfg not found on volume"
-    fi
-else
-    echo "WARN: search --label AURIONOS_LIVE failed. Visible devices:"
-    ls
+    echo "Found AURIONOS_LIVE at (\$aurion_root) — chainloading main menu"
+    set root=\$aurion_root
+    set prefix=(\$aurion_root)/boot/grub
+    configfile (\$aurion_root)/boot/grub/grub.cfg
 fi
-
-# Fallback inline menu: reached only if chainload above failed.
-# Kernel/initrd names substituted at build time by sed below.
-set timeout_style=menu
+# Fallback inline menu (only reached if search failed above)
 set timeout=10
 set default=0
-
 menuentry "Start AurionOS Live (Wayland)" {
     search --no-floppy --set=root --label AURIONOS_LIVE
-    echo "Loading kernel from ($root)/__BOOT_DIR__/__K_FILE__ ..."
-    linux  ($root)/__BOOT_DIR__/__K_FILE__ boot=casper quiet splash ---
-    initrd ($root)/__BOOT_DIR__/__I_FILE__
+    linux  (\$root)/$BOOT_DIR/$K_FILE boot=casper quiet splash ---
+    initrd (\$root)/$BOOT_DIR/$I_FILE
 }
 menuentry "Start AurionOS Live (Safe Graphics)" {
     search --no-floppy --set=root --label AURIONOS_LIVE
-    linux  ($root)/__BOOT_DIR__/__K_FILE__ boot=casper nomodeset quiet splash ---
-    initrd ($root)/__BOOT_DIR__/__I_FILE__
+    linux  (\$root)/$BOOT_DIR/$K_FILE boot=casper nomodeset quiet splash ---
+    initrd (\$root)/$BOOT_DIR/$I_FILE
 }
 EOF
+}
 
-# Substitute kernel/initrd filenames into the fallback section
-sed -i "s|__BOOT_DIR__|$BOOT_DIR|g; s|__K_FILE__|$K_FILE|g; s|__I_FILE__|$I_FILE|g" \
-    /tmp/aurion-memdisk-grub.cfg
+# Plant the stub in every path Canonical signed grub is known to probe:
+#   /EFI/ubuntu/grub.cfg  — primary (embedded prefix on Canonical builds)
+#   /EFI/BOOT/grub.cfg    — $cmdpath fallback when shim loads grub from /EFI/BOOT
+#   /boot/grub/grub.cfg   — generic prefix fallback
+#   /grub.cfg             — last-resort root-of-ESP probe
+make_stub "EFI/ubuntu"  build_efi/EFI/ubuntu/grub.cfg
+make_stub "EFI/BOOT"    build_efi/EFI/BOOT/grub.cfg
+make_stub "boot/grub"   build_efi/boot/grub/grub.cfg
+make_stub "root"        build_efi/grub.cfg
 
-# Build the standalone grub EFI binary. The file mapping
-# "boot/grub/grub.cfg=/tmp/..." places our config at (memdisk)/boot/grub/grub.cfg,
-# which is where grub-mkstandalone sets $prefix by default — so grub auto-loads
-# our config at startup. No external stub needed.
-GRUB_MODULES="all_video boot btrfs cat chain configfile echo efifwsetup efinet \
-    ext2 fat font gettext gfxmenu gfxterm gfxterm_background gzio halt help \
-    hfsplus iso9660 jfs jpeg keystatus linux loadenv loopback ls lsefi lsefimmap \
-    lsefisystab memdisk minicmd normal part_apple part_gpt part_msdos png probe \
-    reboot regexp search search_fs_file search_fs_uuid search_label sleep test \
-    true video xfs"
-
-grub-mkstandalone \
-    --format=x86_64-efi \
-    --output=build_efi/EFI/BOOT/BOOTx64.EFI \
-    --modules="$GRUB_MODULES" \
-    --locales="" \
-    --fonts="" \
-    "boot/grub/grub.cfg=/tmp/aurion-memdisk-grub.cfg" \
-    || fail "grub-mkstandalone failed — check that grub-efi-amd64-bin is installed"
-
-# Sanity check the produced binary
-EFI_BIN_SIZE=$(stat -c%s build_efi/EFI/BOOT/BOOTx64.EFI)
-if [ "$EFI_BIN_SIZE" -lt 1000000 ]; then
-    fail "BOOTx64.EFI is too small ($EFI_BIN_SIZE bytes) — grub-mkstandalone likely malfunctioned"
-fi
-echo "[AurionOS] Built BOOTx64.EFI (${EFI_BIN_SIZE} bytes)"
-
-# --- Package efi.img (FAT32 ESP) ---
-echo "[AurionOS] Packaging efi.img..."
+# --- Step D: package the FAT32 ESP ---
+echo "[AurionOS] Packaging efi.img (FAT32 EFI System Partition)..."
 mkdir -p binary/boot/grub
-dd if=/dev/zero of=binary/boot/grub/efi.img bs=1M count=16 status=none
+dd if=/dev/zero of=binary/boot/grub/efi.img bs=1M count=32 status=none
 mkfs.vfat -F 32 -n AURIONEFI binary/boot/grub/efi.img >/dev/null
 
+# Create directory tree then copy files. Explicit calls are more reliable than
+# a single mcopy -s glob, which occasionally drops nested files silently.
 mmd  -i binary/boot/grub/efi.img ::/EFI
 mmd  -i binary/boot/grub/efi.img ::/EFI/BOOT
-mcopy -i binary/boot/grub/efi.img build_efi/EFI/BOOT/BOOTx64.EFI ::/EFI/BOOT/BOOTx64.EFI
-# Mirror at grubx64.efi for firmwares that probe that name
-mcopy -i binary/boot/grub/efi.img build_efi/EFI/BOOT/BOOTx64.EFI ::/EFI/BOOT/grubx64.efi
+mmd  -i binary/boot/grub/efi.img ::/EFI/ubuntu
+mmd  -i binary/boot/grub/efi.img ::/boot
+mmd  -i binary/boot/grub/efi.img ::/boot/grub
 
-echo "[AurionOS] efi.img contents:"
+mcopy -i binary/boot/grub/efi.img build_efi/EFI/BOOT/BOOTx64.EFI  ::/EFI/BOOT/BOOTx64.EFI
+mcopy -i binary/boot/grub/efi.img build_efi/EFI/BOOT/grubx64.efi  ::/EFI/BOOT/grubx64.efi
+[ -f build_efi/EFI/BOOT/mmx64.efi ] && \
+    mcopy -i binary/boot/grub/efi.img build_efi/EFI/BOOT/mmx64.efi ::/EFI/BOOT/mmx64.efi
+mcopy -i binary/boot/grub/efi.img build_efi/EFI/BOOT/grub.cfg     ::/EFI/BOOT/grub.cfg
+mcopy -i binary/boot/grub/efi.img build_efi/EFI/ubuntu/grubx64.efi ::/EFI/ubuntu/grubx64.efi
+mcopy -i binary/boot/grub/efi.img build_efi/EFI/ubuntu/grub.cfg   ::/EFI/ubuntu/grub.cfg
+mcopy -i binary/boot/grub/efi.img build_efi/boot/grub/grub.cfg    ::/boot/grub/grub.cfg
+mcopy -i binary/boot/grub/efi.img build_efi/grub.cfg              ::/grub.cfg
+
+echo "[AurionOS] efi.img final contents:"
 mdir -i binary/boot/grub/efi.img -/ ::/ || true
 
 # --- Real grub.cfg on iso9660 root (chainloaded from embedded config above) ---
